@@ -69,6 +69,22 @@ body{
   font-family:'Manrope',sans-serif;
 }
 
+.crumbRow{display:flex;gap:8px;margin-bottom:14px;}
+.crumb{
+  position:relative;padding:9px 14px;border-radius:10px;background:var(--panel-2);
+  border:1px solid var(--line);font-size:13px;font-weight:700;cursor:pointer;
+  display:inline-flex;align-items:center;gap:5px;
+}
+.crumb .car{font-size:10px;color:var(--muted);}
+.menuPop{
+  position:absolute;top:calc(100% + 6px);left:0;min-width:110px;background:var(--panel-2);
+  border:1px solid var(--line);border-radius:10px;padding:6px;z-index:30;
+  box-shadow:0 8px 24px rgba(0,0,0,.4);
+}
+.menuItem{padding:8px 10px;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;}
+.menuItem:hover{background:var(--panel);}
+.menuItem.act{background:linear-gradient(135deg, var(--steel), var(--sea));color:#fff;font-weight:800;}
+
 .navGroup{margin-bottom:12px;}
 .navGroup .navLbl{font-size:10px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin:0 2px 6px;}
 .pillStrip{display:flex;gap:8px;overflow-x:auto;padding-bottom:2px;}
@@ -240,7 +256,8 @@ const state = {
   week: 1, // semana relativa 1-4 dentro del mes
   days: [], // [{id, day_order, title, exercises:[...]}]
   dayIdx: 0,
-  logsByRE: {}
+  logsByRE: {},
+  openMenu: null // null | 'year' | 'month'
 };
 
 const root = document.getElementById("root");
@@ -400,29 +417,30 @@ function render() {
     </div>
 
     ${state.allRoutines.length ? `
-      <div class="navGroup">
-        <div class="navLbl">Año</div>
-        <div class="pillStrip">
-          ${yearsAvailable().map(y => `
-            <div class="pill ${y === state.year ? "active" : ""}" onclick="selectYear(${y})"><div class="num">${y}</div></div>
-          `).join("")}
+      <div class="crumbRow">
+        <div class="crumb" onclick="event.stopPropagation(); toggleMenu('year')">
+          ${state.year} <span class="car">▾</span>
+          ${state.openMenu === "year" ? `
+            <div class="menuPop" onclick="event.stopPropagation()">
+              ${yearsAvailable().map(y => `<div class="menuItem ${y === state.year ? "act" : ""}" onclick="selectYear(${y})">${y}</div>`).join("")}
+            </div>
+          ` : ""}
+        </div>
+        <div class="crumb" onclick="event.stopPropagation(); toggleMenu('month')">
+          Mes ${state.month} <span class="car">▾</span>
+          ${state.openMenu === "month" ? `
+            <div class="menuPop" onclick="event.stopPropagation()">
+              ${monthsAvailable(state.year).map(m => `<div class="menuItem ${m.month === state.month ? "act" : ""}" onclick="selectMonth(${m.month})">Mes ${m.month}</div>`).join("")}
+            </div>
+          ` : ""}
         </div>
       </div>
 
       <div class="navGroup">
-        <div class="navLbl">Mes</div>
+        <div class="navLbl">Semana</div>
         <div class="pillStrip">
-          ${monthsAvailable(state.year).map(m => `
-            <div class="pill ${m.month === state.month ? "active" : ""}" onclick="selectMonth(${m.month})"><div class="num">${m.month}</div></div>
-          `).join("")}
-        </div>
-      </div>
-
-      <div class="navGroup">
-        <div class="navLbl">Día</div>
-        <div class="pillStrip">
-          ${state.days.map((d, i) => `
-            <div class="pill ${i === state.dayIdx ? "active" : ""}" onclick="selectDay(${i})"><div class="num">${d.day_order}</div></div>
+          ${[1, 2, 3, 4].map(w => `
+            <div class="pill ${w === state.week ? "active" : ""}" onclick="selectWeek(${w})"><div class="num">${w}</div></div>
           `).join("")}
         </div>
       </div>
@@ -430,8 +448,8 @@ function render() {
       <div class="monthBar">
         <b>${day ? day.title : ""}</b>
         <div class="weekPicker">
-          ${[1, 2, 3, 4].map(w => `
-            <div class="weekChip ${w === state.week ? "active" : ""}" onclick="selectWeek(${w})">${w}</div>
+          ${state.days.map((d, i) => `
+            <div class="weekChip ${i === state.dayIdx ? "active" : ""}" onclick="selectDay(${i})">${d.day_order}</div>
           `).join("")}
         </div>
       </div>
@@ -446,6 +464,7 @@ function render() {
       </div>
     ` : `<div class="empty">Todavía no hay una rutina generada para ${u.name}.</div>`}
   `;
+  document.onclick = () => { if (state.openMenu) { state.openMenu = null; render(); } };
 }
 
 const MODES = [
@@ -545,8 +564,13 @@ function selectUserFromLanding(user) {
   state.view = "routine";
   loadRoutine();
 }
+function toggleMenu(which) {
+  state.openMenu = state.openMenu === which ? null : which;
+  render();
+}
 async function selectYear(y) {
   state.year = y;
+  state.openMenu = null;
   const months = monthsAvailable(y);
   const m = months[months.length - 1];
   state.month = m.month;
@@ -558,6 +582,7 @@ async function selectMonth(m) {
   const match = state.allRoutines.find(r => r.year === state.year && r.month === m);
   if (!match) return;
   state.month = m;
+  state.openMenu = null;
   state.routineId = match.id;
   await loadRoutineDays();
   render();
