@@ -225,6 +225,41 @@ body{
   font-weight:700;font-size:12.5px;z-index:300;
 }
 
+/* ── Medidas ── */
+.mCard{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:16px;margin-bottom:14px;}
+.mCard h3{font-family:'Cormorant',serif;font-size:20px;font-weight:700;margin:0 0 10px;}
+.mHead{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px;}
+.mHead h3{margin:0;}
+.mBtn{background:linear-gradient(135deg, var(--steel), var(--sea));border:none;color:#fff;border-radius:999px;padding:8px 14px;font-size:12px;font-weight:800;cursor:pointer;font-family:'Manrope',sans-serif;}
+.mBtn.ghost{background:var(--panel-2);border:1px solid var(--line);color:var(--text);}
+.kpis{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;}
+@media(min-width:760px){ .kpis{grid-template-columns:repeat(4,1fr);} }
+.kpi{background:var(--panel-2);border:1px solid var(--line);border-radius:12px;padding:11px 12px;}
+.kpi .k{font-size:10px;color:var(--muted);font-weight:800;text-transform:uppercase;letter-spacing:.4px;}
+.kpi .v{font-size:20px;font-weight:800;margin-top:3px;}
+.kpi .s{font-size:11px;color:var(--muted);margin-top:2px;line-height:1.4;}
+.bar{height:10px;border-radius:999px;background:var(--panel-2);border:1px solid var(--line);overflow:hidden;margin:12px 0 6px;}
+.bar > div{height:100%;background:linear-gradient(90deg, var(--steel), var(--sea-light));}
+.note{font-size:11.5px;color:var(--muted);line-height:1.55;}
+.statusOk{color:var(--green);font-weight:800;}
+.statusWarn{color:var(--amber);font-weight:800;}
+.tblWrap{overflow-x:auto;margin:0 -4px;}
+table.mTbl{border-collapse:collapse;width:auto;min-width:100%;font-size:12.5px;}
+table.mTbl th, table.mTbl td{padding:8px 8px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap;}
+table.mTbl th:first-child, table.mTbl td:first-child{text-align:left;position:sticky;left:0;background:var(--panel);font-weight:700;}
+table.mTbl thead th{font-size:10.5px;color:var(--muted);text-transform:uppercase;font-weight:800;}
+table.mTbl th.ed{cursor:pointer;}
+.dlt{display:block;font-size:10px;font-weight:700;}
+.dlt.up{color:var(--sea-light);} .dlt.down{color:var(--steel-light);} .dlt.good{color:var(--green);} .dlt.bad{color:var(--red);}
+.chartBox svg{width:100%;height:auto;display:block;}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--muted);margin-top:6px;}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px;vertical-align:-1px;}
+.formGrid{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+.formGrid label{font-size:10.5px;color:var(--muted);font-weight:800;text-transform:uppercase;display:flex;flex-direction:column;gap:4px;}
+.formGrid input{padding:9px 10px;border-radius:9px;border:1px solid var(--line);background:var(--panel-2);color:var(--text);font-size:14px;font-weight:700;font-family:'Manrope',sans-serif;min-width:0;}
+.formGrid .full{grid-column:1 / -1;}
+.formGrid > *{min-width:0;}
+.formGrid input{width:100%;}
 </style>
 </head>
 <body>
@@ -261,7 +296,9 @@ const state = {
   days: [], // [{id, day_order, title, exercises:[...]}]
   dayIdx: 0,
   logsByRE: {},
-  openMenu: null // null | 'year' | 'month'
+  openMenu: null, // null | 'year' | 'month'
+  tab: "routine", // 'routine' | 'measures'
+  mdata: null // { profile, meas:[], inbody:[] }
 };
 
 const root = document.getElementById("root");
@@ -400,6 +437,7 @@ async function loadLogsForDay() {
 
 // ── Render ──────────────────────────────────────────────────────
 function render() {
+  if (state.tab === "measures") { renderMeasures(); return; }
   const u = USERS[state.user];
   const day = state.days[state.dayIdx];
 
@@ -413,12 +451,7 @@ function render() {
       <button class="switchBtn" onclick="goToLanding()">Cambiar</button>
     </div>
 
-    <div class="tabs">
-      <button class="tabBtn active">🏋️ Rutina</button>
-      <button class="tabBtn" onclick="flash('Próximamente')">📅 Historial</button>
-      <button class="tabBtn" onclick="flash('Próximamente')">📏 Medidas</button>
-      <button class="tabBtn" onclick="flash('Próximamente')">👤 Perfil</button>
-    </div>
+    ${tabsHtml()}
 
     ${state.allRoutines.length ? `
       <div class="crumbRow">
@@ -560,6 +593,8 @@ function selectUserFromLanding(user) {
   state.year = null;
   state.month = null;
   state.view = "routine";
+  state.tab = "routine";
+  state.mdata = null;
   loadRoutine();
 }
 function toggleMenu(which) {
@@ -677,6 +712,345 @@ async function uploadImage(evt, exerciseId, exerciseName) {
 }
 function sanitizeFileName(name) {
   return name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+}
+
+// ── Pestañas ────────────────────────────────────────────────────
+function tabsHtml() {
+  const t = state.tab;
+  return `
+    <div class="tabs">
+      <button class="tabBtn ${t === "routine" ? "active" : ""}" onclick="setTab('routine')">🏋️ Rutina</button>
+      <button class="tabBtn" onclick="flash('Próximamente')">📅 Historial</button>
+      <button class="tabBtn ${t === "measures" ? "active" : ""}" onclick="setTab('measures')">📏 Medidas</button>
+      <button class="tabBtn" onclick="flash('Próximamente')">👤 Perfil</button>
+    </div>`;
+}
+async function setTab(tab) {
+  state.tab = tab;
+  state.openMenu = null;
+  if (tab === "measures") {
+    root.innerHTML = `<div class="loading">Cargando medidas...</div>`;
+    await loadMeasures();
+  }
+  render();
+}
+
+// ── Medidas: datos ──────────────────────────────────────────────
+// Convenciones (acordadas con los usuarios):
+// - "waist" es el ABDOMEN medido a la altura del ombligo (siempre el mismo punto).
+// - "hips" se muestra como "Glúteos".
+// - La cintura del InBody es otra medición y vive en inbody_scans.
+const M_FIELDS = [
+  { k: "weight", l: "Peso", u: "kg" },
+  { k: "waist", l: "Abdomen (ombligo)", u: "cm" },
+  { k: "hips", l: "Glúteos", u: "cm" },
+  { k: "chest", l: "Pecho", u: "cm" },
+  { k: "arm_l", l: "Brazo izq", u: "cm" },
+  { k: "arm_r", l: "Brazo der", u: "cm" },
+  { k: "thigh_l", l: "Muslo izq", u: "cm" },
+  { k: "thigh_r", l: "Muslo der", u: "cm" },
+  { k: "calf_l", l: "Pantorrilla izq", u: "cm" },
+  { k: "calf_r", l: "Pantorrilla der", u: "cm" }
+];
+const IB_FIELDS = [
+  { k: "weight", l: "Peso", u: "kg" },
+  { k: "body_fat_pct", l: "% Grasa corporal", u: "%" },
+  { k: "fat_mass", l: "Masa grasa", u: "kg" },
+  { k: "skeletal_muscle", l: "Masa musculoesquelética", u: "kg" },
+  { k: "fat_free_mass", l: "Masa libre de grasa", u: "kg" },
+  { k: "body_water", l: "Agua corporal", u: "L" },
+  { k: "protein", l: "Proteínas", u: "kg" },
+  { k: "minerals", l: "Minerales", u: "kg" },
+  { k: "bmi", l: "IMC", u: "" },
+  { k: "visceral_fat_level", l: "Grasa visceral (nivel)", u: "" },
+  { k: "waist_hip_ratio", l: "Relación cintura-cadera", u: "" },
+  { k: "waist_estimated", l: "Cintura estimada InBody", u: "cm" },
+  { k: "bmr", l: "Metabolismo basal", u: "kcal" },
+  { k: "inbody_score", l: "Puntuación InBody", u: "/100" },
+  { k: "target_weight", l: "Peso objetivo InBody", u: "kg" }
+];
+
+async function loadMeasures() {
+  const [p, m, ib] = await Promise.all([
+    sb.from("profiles").select("*").eq("id", state.user).maybeSingle(),
+    sb.from("measurements").select("*").eq("user_id", state.user).order("month", { ascending: true }),
+    sb.from("inbody_scans").select("*").eq("user_id", state.user).order("date", { ascending: true })
+  ]);
+  if (p.error || m.error || ib.error) {
+    const e = p.error || m.error || ib.error;
+    console.error(e);
+    flash("Error al cargar medidas: " + e.message);
+  }
+  state.mdata = { profile: p.data || {}, meas: m.data || [], inbody: ib.data || [] };
+}
+
+// ── Utilidades ──────────────────────────────────────────────────
+function parseD(s) { if (!s) return null; const [y, mo, d] = String(s).slice(0, 10).split("-").map(Number); return new Date(y, mo - 1, d); }
+function fmtD(s) { const d = typeof s === "string" ? parseD(s) : s; if (!d) return "—"; return d.toLocaleDateString("es-CR", { day: "2-digit", month: "short", year: "numeric" }); }
+function isoD(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }
+function nOrNull(v) { return v === null || v === undefined || v === "" ? null : Number(v); }
+function fmtN(v, dec = 1) { if (v === null || v === undefined || v === "") return "—"; const n = Number(v); return Number.isInteger(n) ? String(n) : n.toFixed(dec); }
+function ageFrom(birth) {
+  const b = parseD(birth); if (!b) return null;
+  const t = new Date(); let a = t.getFullYear() - b.getFullYear();
+  if (t.getMonth() < b.getMonth() || (t.getMonth() === b.getMonth() && t.getDate() < b.getDate())) a--;
+  return a;
+}
+function weightSeries() {
+  const { meas, inbody } = state.mdata;
+  const pts = [];
+  meas.forEach(r => { if (r.weight != null) pts.push({ d: parseD(r.date), w: Number(r.weight), src: "cinta", label: r.month === 0 ? "Inicial" : "Mes " + r.month }); });
+  inbody.forEach(r => { if (r.weight != null) pts.push({ d: parseD(r.date), w: Number(r.weight), src: "inbody", label: "InBody" }); });
+  return pts.sort((a, b) => a.d - b.d);
+}
+
+// Ritmos de referencia (% del peso corporal por semana):
+// bajar 0.5–1 %/sem (NASM); subir 0.25–0.5 %/sem (Iraki et al., 2019).
+function paceRange(losing) { return losing ? [0.5, 1.0] : [0.25, 0.5]; }
+
+// ── Medidas: render ─────────────────────────────────────────────
+function renderMeasures() {
+  const u = USERS[state.user];
+  document.onclick = null;
+  const md = state.mdata || { profile: {}, meas: [], inbody: [] };
+  root.innerHTML = `
+    <div class="header">
+      <div class="avatar" style="background:${u.color}">${initials(u.name)}</div>
+      <div class="who">
+        <div class="greet">${u.name}${ageFrom(md.profile.birth_date) != null ? " · " + ageFrom(md.profile.birth_date) + " años" : ""}${md.profile.height_cm ? " · " + fmtN(md.profile.height_cm) + " cm" : ""}</div>
+        <h1>Medidas</h1>
+      </div>
+      <button class="switchBtn" onclick="goToLanding()">Cambiar</button>
+    </div>
+    ${tabsHtml()}
+    ${goalCardHtml()}
+    ${weightChartHtml()}
+    ${measTableHtml()}
+    ${inbodyCardHtml()}
+    <div class="mCard">
+      <h3>Cómo medir</h3>
+      <div class="note">
+        Para que los meses sean comparables: en ayunas, en la mañana y antes de entrenar; siempre la misma persona midiendo.
+        <b>Abdomen</b>: a la altura del ombligo. <b>Muslo</b>: a una distancia fija sobre la rótula (por ejemplo 15 cm), marcada con la cinta.
+        <b>Brazo</b>: punto medio entre hombro y codo, relajado. <b>Pantorrilla</b>: en la parte más ancha.
+        La cintura del InBody es una estimación del equipo y no se compara con la medida con cinta.
+      </div>
+    </div>
+  `;
+}
+
+function goalCardHtml() {
+  const { profile } = state.mdata;
+  const pts = weightSeries();
+  if (!pts.length) return `<div class="mCard"><h3>Meta de peso</h3><div class="note">Sin registros de peso todavía.</div></div>`;
+  const cur = pts[pts.length - 1];
+  const start = pts[0];
+  const goal = nOrNull(profile.goal_weight);
+  const longGoal = nOrNull(profile.long_term_goal_weight);
+  if (goal == null) {
+    return `<div class="mCard"><h3>Meta de peso</h3>
+      <div class="kpis"><div class="kpi"><div class="k">Peso actual</div><div class="v">${fmtN(cur.w)} kg</div><div class="s">${cur.label} · ${fmtD(cur.d)}</div></div></div>
+      <div class="note" style="margin-top:10px">No hay meta de peso registrada en el perfil.</div></div>`;
+  }
+  const losing = goal < start.w;
+  const totalDelta = goal - start.w;
+  const done = cur.w - start.w;
+  const prog = totalDelta === 0 ? 1 : Math.max(0, Math.min(1, done / totalDelta));
+  const remaining = goal - cur.w;
+  const gd = parseD(profile.goal_date);
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const weeksLeft = gd ? (gd - today) / (7 * 864e5) : null;
+  const [lo, hi] = paceRange(losing);
+  let paceHtml = "";
+  if (Math.abs(remaining) < 0.05 || (losing ? remaining >= 0 : remaining <= 0)) {
+    paceHtml = `<span class="statusOk">Meta alcanzada.</span>`;
+  } else if (weeksLeft != null && weeksLeft > 0) {
+    const perWeek = remaining / weeksLeft;
+    const pct = Math.abs(perWeek) / cur.w * 100;
+    const ok = pct <= hi;
+    paceHtml = `Para llegar el ${fmtD(gd)} hace falta ${losing ? "bajar" : "subir"} <b>${fmtN(Math.abs(perWeek), 2)} kg/sem</b> (${fmtN(pct, 2)} % del peso por semana).
+      Rango recomendado: ${lo}–${hi} %/sem. ${ok ? `<span class="statusOk">Dentro del rango.</span>` : `<span class="statusWarn">Por encima del rango recomendado.</span>`}`;
+  } else if (gd) {
+    paceHtml = `<span class="statusWarn">La fecha meta (${fmtD(gd)}) ya pasó.</span>`;
+  }
+  const eta = (target, ratePct) => {
+    const kgWeek = cur.w * ratePct / 100;
+    const weeks = Math.abs(target - cur.w) / kgWeek;
+    const d = new Date(today.getTime() + weeks * 7 * 864e5);
+    return fmtD(d);
+  };
+  const etaHtml = (Math.abs(remaining) >= 0.05 && (losing ? remaining < 0 : remaining > 0))
+    ? `Al ritmo recomendado, la meta de ${fmtN(goal)} kg se alcanza entre el <b>${eta(goal, hi)}</b> y el <b>${eta(goal, lo)}</b>.` : "";
+  const longHtml = (longGoal != null && (losing ? longGoal < cur.w : longGoal > cur.w))
+    ? `<div class="kpi"><div class="k">Meta largo plazo</div><div class="v">${fmtN(longGoal)} kg</div><div class="s">Estimado: ${eta(longGoal, hi)} – ${eta(longGoal, lo)}</div></div>` : "";
+  return `
+    <div class="mCard">
+      <h3>Meta de peso</h3>
+      <div class="kpis">
+        <div class="kpi"><div class="k">Peso actual</div><div class="v">${fmtN(cur.w)} kg</div><div class="s">${cur.label} · ${fmtD(cur.d)}</div></div>
+        <div class="kpi"><div class="k">Meta</div><div class="v">${fmtN(goal)} kg</div><div class="s">${gd ? fmtD(gd) : "sin fecha"}</div></div>
+        <div class="kpi"><div class="k">Falta</div><div class="v">${remaining > 0 ? "+" : ""}${fmtN(remaining)} kg</div><div class="s">Desde ${fmtN(start.w)} kg (${fmtD(start.d)})</div></div>
+        ${longHtml}
+      </div>
+      <div class="bar"><div style="width:${Math.round(prog * 100)}%"></div></div>
+      <div class="note">${Math.round(prog * 100)} % del camino desde el peso inicial.</div>
+      <div class="note" style="margin-top:8px">${paceHtml}</div>
+      ${etaHtml ? `<div class="note" style="margin-top:6px">${etaHtml}</div>` : ""}
+    </div>`;
+}
+
+function weightChartHtml() {
+  const pts = weightSeries();
+  if (pts.length < 2) return "";
+  const { profile } = state.mdata;
+  const goal = nOrNull(profile.goal_weight), longGoal = nOrNull(profile.long_term_goal_weight);
+  const narrow = window.innerWidth < 600;
+  const W = narrow ? 360 : 640, H = narrow ? 220 : 230, L = 34, R = 10, T = 14, B = 28;
+  const ws = pts.map(p => p.w).concat([goal, longGoal].filter(v => v != null));
+  let minW = Math.floor(Math.min(...ws) - 0.5), maxW = Math.ceil(Math.max(...ws) + 0.5);
+  if (maxW - minW < 3) { minW -= 1; maxW += 1; }
+  const gd = parseD(profile.goal_date);
+  const t0 = pts[0].d.getTime();
+  let t1 = pts[pts.length - 1].d.getTime();
+  if (gd && gd.getTime() > t1) t1 = gd.getTime();
+  const x = t => L + (W - L - R) * ((t - t0) / Math.max(1, t1 - t0));
+  const y = w => T + (H - T - B) * (1 - (w - minW) / (maxW - minW));
+  const tape = pts.filter(p => p.src === "cinta");
+  const path = tape.map((p, i) => `${i ? "L" : "M"}${x(p.d.getTime()).toFixed(1)},${y(p.w).toFixed(1)}`).join(" ");
+  const ticks = []; const step = (maxW - minW) > 8 ? 2 : 1;
+  for (let v = minW; v <= maxW; v += step) ticks.push(v);
+  const hline = (v, col, lbl) => v == null ? "" : `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="${col}" stroke-dasharray="5 4" stroke-width="1.5"/><text x="${W - R}" y="${y(v) - 4}" fill="${col}" font-size="10" text-anchor="end">${lbl} ${fmtN(v)} kg</text>`;
+  const months = []; const d0 = new Date(pts[0].d.getFullYear(), pts[0].d.getMonth(), 1);
+  for (let d = new Date(d0); d.getTime() <= t1; d.setMonth(d.getMonth() + 1)) if (d.getTime() >= t0) months.push(new Date(d));
+  return `
+    <div class="mCard chartBox">
+      <h3>Peso</h3>
+      <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Evolución del peso">
+        ${ticks.map(v => `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="rgba(255,255,255,0.06)"/><text x="${L - 6}" y="${y(v) + 3}" fill="#8A93A3" font-size="10" text-anchor="end">${v}</text>`).join("")}
+        ${months.map(d => `<text x="${x(d.getTime())}" y="${H - 10}" fill="#8A93A3" font-size="10" text-anchor="middle">${d.toLocaleDateString("es-CR", { month: "short" })}</text>`).join("")}
+        ${hline(goal, "#D3A24C", "Meta")}
+        ${hline(longGoal, "#8A93A3", "Largo plazo")}
+        ${gd ? `<line x1="${x(gd.getTime())}" x2="${x(gd.getTime())}" y1="${T}" y2="${H - B}" stroke="#D3A24C" stroke-opacity=".4"/>` : ""}
+        <path d="${path}" fill="none" stroke="#5C93AE" stroke-width="2.5"/>
+        ${tape.map(p => `<circle cx="${x(p.d.getTime())}" cy="${y(p.w)}" r="4.5" fill="#5C93AE"><title>${p.label} · ${fmtD(p.d)} · ${fmtN(p.w)} kg</title></circle>`).join("")}
+        ${pts.filter(p => p.src === "inbody").map(p => { const cx = x(p.d.getTime()), cy = y(p.w); return `<rect x="${cx - 5}" y="${cy - 5}" width="10" height="10" transform="rotate(45 ${cx} ${cy})" fill="#54A491"><title>InBody · ${fmtD(p.d)} · ${fmtN(p.w)} kg</title></rect>`; }).join("")}
+      </svg>
+      <div class="legend"><span><i style="background:#5C93AE"></i>Báscula (medición con cinta)</span><span><i style="background:#54A491;border-radius:2px"></i>InBody</span><span><i style="background:#D3A24C"></i>Meta</span></div>
+    </div>`;
+}
+
+function measTableHtml() {
+  const { meas, profile } = state.mdata;
+  const goal = nOrNull(profile.goal_weight);
+  const losing = goal != null && meas.length && goal < Number(meas[0].weight);
+  const head = `
+    <div class="mHead"><h3>Medidas con cinta</h3><button class="mBtn" onclick="openMeasForm()">+ Registrar</button></div>`;
+  if (!meas.length) return `<div class="mCard">${head}<div class="note">Sin medidas registradas.</div></div>`;
+  const cell = (r, prev, f) => {
+    const v = r[f.k];
+    if (v == null) return `<td>—</td>`;
+    let d = "";
+    if (prev && prev[f.k] != null) {
+      const diff = Number(v) - Number(prev[f.k]);
+      if (Math.abs(diff) >= 0.05) {
+        let cls = diff > 0 ? "up" : "down";
+        if (f.k === "weight" && goal != null) cls = (losing ? diff < 0 : diff > 0) ? "good" : "bad";
+        d = `<span class="dlt ${cls}">${diff > 0 ? "▲" : "▼"} ${fmtN(Math.abs(diff))}</span>`;
+      }
+    }
+    return `<td>${fmtN(v)}${d}</td>`;
+  };
+  return `
+    <div class="mCard">${head}
+      <div class="tblWrap"><table class="mTbl">
+        <thead><tr><th>Medida</th>${meas.map(r => `<th class="ed" onclick="openMeasForm(${r.month})" title="Editar">${r.month === 0 ? "Inicial" : "Mes " + r.month}<span class="dlt" style="color:#8A93A3">${fmtD(r.date)}</span></th>`).join("")}</tr></thead>
+        <tbody>
+          ${M_FIELDS.map(f => `<tr><td>${f.l} <span style="color:#8A93A3;font-weight:500">${f.u}</span></td>${meas.map((r, i) => cell(r, meas[i - 1], f)).join("")}</tr>`).join("")}
+        </tbody>
+      </table></div>
+      <div class="note" style="margin-top:8px">Toca el encabezado de un mes para editarlo. ▲▼ = cambio contra el mes anterior.</div>
+    </div>`;
+}
+
+function inbodyCardHtml() {
+  const { inbody } = state.mdata;
+  const head = `<div class="mHead"><h3>InBody</h3><button class="mBtn" onclick="openInbodyForm()">+ Registrar</button></div>`;
+  if (!inbody.length) return `<div class="mCard">${head}<div class="note">Sin análisis InBody registrados.</div></div>`;
+  const last = inbody[inbody.length - 1], prev = inbody.length > 1 ? inbody[inbody.length - 2] : null;
+  const keys = ["body_fat_pct", "skeletal_muscle", "fat_mass", "visceral_fat_level", "bmi", "bmr", "inbody_score", "target_weight"];
+  const kp = k => {
+    const f = IB_FIELDS.find(x => x.k === k);
+    if (last[k] == null) return "";
+    const d = prev && prev[k] != null ? Number(last[k]) - Number(prev[k]) : null;
+    return `<div class="kpi"><div class="k">${f.l}</div><div class="v">${fmtN(last[k])}<span style="font-size:12px;color:#8A93A3"> ${f.u}</span></div>${d != null && Math.abs(d) >= 0.05 ? `<div class="s">${d > 0 ? "▲" : "▼"} ${fmtN(Math.abs(d))} vs ${fmtD(prev.date)}</div>` : ""}</div>`;
+  };
+  return `
+    <div class="mCard">${head}
+      <div class="note" style="margin-bottom:10px">Último análisis: <b>${fmtD(last.date)}</b>${inbody.length > 1 ? ` · ${inbody.length} análisis en total` : ""}</div>
+      <div class="kpis">${keys.map(kp).join("")}</div>
+      <div class="note" style="margin-top:10px">El peso objetivo del InBody lo calcula el equipo; la meta personal es la del perfil.
+        ${inbody.map(r => `<a href="#" onclick="event.preventDefault();openInbodyForm('${String(r.date).slice(0, 10)}')" style="color:#5C93AE;margin-left:6px">Editar ${fmtD(r.date)}</a>`).join("")}</div>
+    </div>`;
+}
+
+// ── Formularios ─────────────────────────────────────────────────
+function formSheet(title, bodyHtml, onSave) {
+  closeSheet();
+  const overlay = document.createElement("div");
+  overlay.className = "overlay"; overlay.id = "overlay";
+  overlay.onclick = (e) => { if (e.target === overlay) closeSheet(); };
+  overlay.innerHTML = `
+    <div class="sheet"><div style="position:relative;height:48px"><button class="closeBtn" onclick="closeSheet()">✕</button></div>
+      <div class="body"><h2>${title}</h2>
+        <form id="mForm" class="formGrid">${bodyHtml}
+          <div class="full" style="display:flex;gap:8px;margin-top:6px"><button type="submit" class="mBtn" style="flex:1;padding:12px">Guardar</button><button type="button" class="mBtn ghost" onclick="closeSheet()">Cancelar</button></div>
+        </form></div></div>`;
+  document.body.appendChild(overlay);
+  document.getElementById("mForm").onsubmit = async (e) => { e.preventDefault(); await onSave(new FormData(e.target)); };
+}
+const inp = (name, label, val, opts = "") => `<label>${label}<input name="${name}" value="${val ?? ""}" ${opts}></label>`;
+
+function openMeasForm(month) {
+  const { meas } = state.mdata;
+  const editing = month !== undefined && month !== null;
+  const r = editing ? meas.find(x => x.month === month) || {} : {};
+  const nextMonth = meas.length ? Math.max(...meas.map(x => x.month)) + 1 : 0;
+  const body = `
+    ${inp("month", "Mes (0 = inicial)", editing ? r.month : nextMonth, `type="number" min="0" step="1" required ${editing ? "readonly" : ""}`)}
+    ${inp("date", "Fecha", editing ? String(r.date).slice(0, 10) : isoD(new Date()), `type="date" required`)}
+    ${M_FIELDS.map(f => inp(f.k, `${f.l} (${f.u})`, r[f.k], `type="number" step="0.1" min="0" inputmode="decimal"`)).join("")}
+    <div class="full note">Abdomen: a la altura del ombligo. Deja vacío lo que no se midió.</div>`;
+  formSheet(editing ? `Editar ${month === 0 ? "medida inicial" : "Mes " + month}` : "Registrar medidas", body, async (fd) => {
+    const row = { user_id: state.user, month: parseInt(fd.get("month")), date: fd.get("date") };
+    if (!Number.isFinite(row.month) || !row.date) { flash("Mes y fecha son obligatorios"); return; }
+    if (!editing && meas.some(x => x.month === row.month)) { flash(`El Mes ${row.month} ya existe: edítalo desde la tabla`); return; }
+    M_FIELDS.forEach(f => { row[f.k] = numOrNull(fd.get(f.k)); });
+    const { error } = await sb.from("measurements").upsert(row, { onConflict: "user_id,month" });
+    if (error) { flash("Error al guardar: " + error.message); return; }
+    closeSheet(); flash("Medidas guardadas ✓");
+    await loadMeasures(); render();
+  });
+}
+
+function openInbodyForm(date) {
+  const { inbody } = state.mdata;
+  const editing = !!date;
+  const r = editing ? inbody.find(x => String(x.date).slice(0, 10) === date) || {} : {};
+  const body = `
+    ${inp("date", "Fecha del análisis", editing ? date : isoD(new Date()), `type="date" required ${editing ? "readonly" : ""}`)}
+    <div></div>
+    ${IB_FIELDS.map(f => inp(f.k, `${f.l}${f.u ? " (" + f.u + ")" : ""}`, r[f.k], `type="number" step="any" min="0" inputmode="decimal"`)).join("")}
+    <div class="full note">Copia los valores de la hoja InBody. Deja vacío lo que la hoja no trae (por ejemplo, la cintura en cm).</div>`;
+  formSheet(editing ? `Editar InBody ${fmtD(date)}` : "Registrar InBody", body, async (fd) => {
+    const row = { user_id: state.user, date: fd.get("date") };
+    if (!row.date) { flash("La fecha es obligatoria"); return; }
+    if (!editing && inbody.some(x => String(x.date).slice(0, 10) === row.date)) { flash("Ya hay un InBody en esa fecha: edítalo"); return; }
+    IB_FIELDS.forEach(f => { row[f.k] = numOrNull(fd.get(f.k)); });
+    const { error } = await sb.from("inbody_scans").upsert(row, { onConflict: "user_id,date" });
+    if (error) { flash("Error al guardar: " + error.message); return; }
+    closeSheet(); flash("InBody guardado ✓");
+    await loadMeasures(); render();
+  });
 }
 
 // ── Init ────────────────────────────────────────────────────────
