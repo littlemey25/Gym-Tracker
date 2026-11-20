@@ -260,6 +260,9 @@ table.mTbl th.ed{cursor:pointer;}
 .formGrid .full{grid-column:1 / -1;}
 .formGrid > *{min-width:0;}
 .formGrid input{width:100%;}
+.sugTag{font-size:11px;color:var(--amber);font-weight:700;line-height:1.4;}
+.numInputSm.sug{color:var(--amber);border-style:dashed;}
+.modeHint{font-size:10.5px;color:var(--muted);line-height:1.4;}
 </style>
 </head>
 <body>
@@ -416,28 +419,36 @@ async function loadRoutineDays() {
   state.days = days;
   state.dayIdx = 0;
   state.restWarnings = computeRestWarnings(days, await getRestRules());
+  await loadPrevByExercise();
   await loadLogsForDay();
 }
 
+// Carga las 4 semanas del mes para el día (la progresión necesita S1 y S3).
 async function loadLogsForDay() {
+  state.logsByWeek = { 1: {}, 2: {}, 3: {}, 4: {} };
+  state.logsByRE = state.logsByWeek[state.week];
   const day = state.days[state.dayIdx];
-  if (!day) { state.logsByRE = {}; return; }
+  if (!day) return;
   const reIds = day.routine_exercises.map(re => re.id);
-  const absWeek = (state.month - 1) * 4 + state.week;
-  if (!reIds.length) { state.logsByRE = {}; return; }
+  if (!reIds.length) return;
+  const w0 = (state.month - 1) * 4 + 1;
   const { data: logs, error } = await sb
     .from("logs")
     .select("*")
     .eq("user_id", state.user)
-    .eq("week", absWeek)
+    .gte("week", w0)
+    .lte("week", w0 + 3)
     .in("routine_exercise_id", reIds);
-  state.logsByRE = {};
-  (logs || []).forEach(l => { state.logsByRE[l.routine_exercise_id] = l; });
+  if (error) console.error(error);
+  (logs || []).forEach(l => { const rw = l.week - w0 + 1; if (state.logsByWeek[rw]) state.logsByWeek[rw][l.routine_exercise_id] = l; });
+  state.logsByRE = state.logsByWeek[state.week];
 }
 
 // ── Render ──────────────────────────────────────────────────────
 function render() {
   if (state.tab === "measures") { renderMeasures(); return; }
+  if (state.tab === "history") { renderHistory(); return; }
+  if (state.tab === "profile") { renderProfile(); return; }
   const u = USERS[state.user];
   const day = state.days[state.dayIdx];
 
@@ -454,24 +465,7 @@ function render() {
     ${tabsHtml()}
 
     ${state.allRoutines.length ? `
-      <div class="crumbRow">
-        <div class="crumb" onclick="event.stopPropagation(); toggleMenu('year')">
-          ${state.year} <span class="car">▾</span>
-          ${state.openMenu === "year" ? `
-            <div class="menuPop" onclick="event.stopPropagation()">
-              ${yearsAvailable().map(y => `<div class="menuItem ${y === state.year ? "act" : ""}" onclick="selectYear(${y})">${y}</div>`).join("")}
-            </div>
-          ` : ""}
-        </div>
-        <div class="crumb" onclick="event.stopPropagation(); toggleMenu('month')">
-          Mes ${state.month} <span class="car">▾</span>
-          ${state.openMenu === "month" ? `
-            <div class="menuPop" onclick="event.stopPropagation()">
-              ${monthsAvailable(state.year).map(m => `<div class="menuItem ${m.month === state.month ? "act" : ""}" onclick="selectMonth(${m.month})">Mes ${m.month}</div>`).join("")}
-            </div>
-          ` : ""}
-        </div>
-      </div>
+      ${crumbsHtml()}
 
       <div class="navGroup">
         <div class="navLbl">Semana</div>
@@ -508,19 +502,24 @@ const MODES = [
   { v: "maquina", l: "Máquina" },
   { v: "mancuerna_uni", l: "1 mancuerna" },
   { v: "mancuerna_par", l: "2 mancuernas" },
-  { v: "barra", l: "Barra/plato" },
+  { v: "barra", l: "Barra libre" },
+  { v: "discos", l: "Discos (prensa/Smith)" },
   { v: "polea", l: "Polea" },
   { v: "sin_peso", l: "Sin peso" }
 ];
 
 function exCardHtml(re) {
   const ex = re.exercises;
-  const log = state.logsByRE[re.id] || {};
+  const saved = state.logsByRE[re.id] || {};
+  const sug = suggestionFor(re);
+  const log = { ...(sug ? sug.vals : {}), ...Object.fromEntries(Object.entries(saved).filter(([, v]) => v !== null && v !== undefined)) };
+  const isSug = k => sug && sug.vals[k] != null && (saved[k] === null || saved[k] === undefined);
   const done = !!log.done;
   const metric = ex.metric_type;
 
   const modeSelect = (field, current) => `
     <select class="modeSelect" onchange="updateLogField('${re.id}','${field}',this.value)">
+      ${current ? "" : `<option value="" selected>Tipo de carga…</option>`}
       ${MODES.map(m => `<option value="${m.v}" ${current === m.v ? "selected" : ""}>${m.l}</option>`).join("")}
     </select>`;
 
@@ -530,23 +529,24 @@ function exCardHtml(re) {
     <div class="inlineRow">
       ${label ? `<span class="inlineLbl">${label}</span>` : ""}
       ${!isBodyweight ? `
-        <input type="number" class="numInputSm" placeholder="peso" value="${log[wField] ?? ""}"
+        <input type="number" class="numInputSm ${isSug(wField) ? "sug" : ""}" placeholder="peso" step="any" value="${log[wField] ?? ""}"
           onchange="updateLogField('${re.id}','${wField}', numOrNull(this.value))">
         <div class="unitToggleSm">
           <span class="uBtn ${(!log[uField] || log[uField] === "lbs") ? "active" : ""}" onclick="updateLogField('${re.id}','${uField}','lbs')">lbs</span>
           <span class="uBtn ${log[uField] === "kg" ? "active" : ""}" onclick="updateLogField('${re.id}','${uField}','kg')">kg</span>
         </div>
       ` : ""}
-      <input type="number" class="numInputSm" placeholder="reps" value="${log[rField] ?? ""}"
+      <input type="number" class="numInputSm ${isSug(rField) ? "sug" : ""}" placeholder="reps" value="${log[rField] ?? ""}"
         onchange="updateLogField('${re.id}','${rField}', intOrNull(this.value))">
       ${modeSelect(modeField, log[modeField])}
-    </div>`;
+    </div>
+    <div class="modeHint">${MODE_HINT[log[modeField]] || "Elige el tipo de carga para saber qué peso anotar."}</div>`;
   };
 
   const timeRow = (sField, label) => `
     <div class="inlineRow">
       ${label ? `<span class="inlineLbl">${label}</span>` : ""}
-      <input type="number" class="numInputSm" placeholder="seg" value="${log[sField] ?? ""}"
+      <input type="number" class="numInputSm ${isSug(sField) ? "sug" : ""}" placeholder="seg" value="${log[sField] ?? ""}"
         onchange="updateLogField('${re.id}','${sField}', intOrNull(this.value))">
       <span class="inlineUnit">segundos</span>
     </div>`;
@@ -577,7 +577,7 @@ function exCardHtml(re) {
         <div class="checkDot ${done ? "on" : ""}" title="Marcar como hecho" onclick="event.stopPropagation(); updateLogField('${re.id}','done', ${!done})"></div>
         <div class="expandIc">›</div>
       </div>
-      ${formHtml ? `<div class="exCardForm" onclick="event.stopPropagation()">${formHtml}</div>` : ""}
+      ${formHtml ? `<div class="exCardForm" onclick="event.stopPropagation()">${sug ? `<div class="sugTag">💡 ${sug.label}</div>` : ""}${formHtml}</div>` : ""}
     </div>
   `;
 }
@@ -621,7 +621,7 @@ async function selectMonth(m) {
   render();
 }
 function selectDay(i) { state.dayIdx = i; loadLogsForDay().then(render); }
-function selectWeek(w) { state.week = w; loadLogsForDay().then(render); }
+function selectWeek(w) { state.week = w; state.logsByRE = (state.logsByWeek || {})[w] || {}; render(); }
 
 let currentRE = null;
 async function openExercise(reId) {
@@ -666,7 +666,10 @@ async function openExercise(reId) {
 async function updateLogField(reId, field, value) {
   const absWeek = (state.month - 1) * 4 + state.week;
   const existing = state.logsByRE[reId] || {};
-  const merged = { ...existing, [field]: value, user_id: state.user, routine_exercise_id: reId, week: absWeek, manual: true };
+  const re = state.days[state.dayIdx].routine_exercises.find(r => r.id === reId);
+  const sug = re ? suggestionFor(re) : null;
+  const clean = Object.fromEntries(Object.entries(existing).filter(([, v]) => v !== null && v !== undefined));
+  const merged = { ...(sug ? sug.vals : {}), ...clean, [field]: value, user_id: state.user, routine_exercise_id: reId, week: absWeek, manual: true };
   state.logsByRE[reId] = merged; // optimista, para que el toggle/checkbox se sienta inmediato
   const { error } = await sb.from("logs").upsert(merged, { onConflict: "user_id,routine_exercise_id,week" });
   if (error) { flash("Error al guardar: " + error.message); console.error(error); return; }
@@ -720,9 +723,9 @@ function tabsHtml() {
   return `
     <div class="tabs">
       <button class="tabBtn ${t === "routine" ? "active" : ""}" onclick="setTab('routine')">🏋️ Rutina</button>
-      <button class="tabBtn" onclick="flash('Próximamente')">📅 Historial</button>
+      <button class="tabBtn ${t === "history" ? "active" : ""}" onclick="setTab('history')">📅 Historial</button>
       <button class="tabBtn ${t === "measures" ? "active" : ""}" onclick="setTab('measures')">📏 Medidas</button>
-      <button class="tabBtn" onclick="flash('Próximamente')">👤 Perfil</button>
+      <button class="tabBtn ${t === "profile" ? "active" : ""}" onclick="setTab('profile')">👤 Perfil</button>
     </div>`;
 }
 async function setTab(tab) {
@@ -732,6 +735,8 @@ async function setTab(tab) {
     root.innerHTML = `<div class="loading">Cargando medidas...</div>`;
     await loadMeasures();
   }
+  if (tab === "history") state.hist = null; // recargar: puede haber registros nuevos
+  if (tab === "routine") await loadLogsForDay();
   render();
 }
 
@@ -1051,6 +1056,338 @@ function openInbodyForm(date) {
     closeSheet(); flash("InBody guardado ✓");
     await loadMeasures(); render();
   });
+}
+
+// ── Progresión dentro del mes ───────────────────────────────────
+// Ciclo de 4 semanas:
+//   S1 base (sugiere el último peso usado en ese ejercicio + reps base de la rutina)
+//   S2 = S1
+//   S3 = mismo peso, +2 repeticiones (tope 15)
+//   S4 = si S3 se completó con +2 reps → sube carga y vuelve a las reps de S1.
+//        La subida se ajusta al 2–10 % de la carga (ACSM, 2009). Si el salto mínimo
+//        disponible supera el 10 % (cargas muy livianas), se mantiene el peso y se
+//        conservan las reps de S3 (doble progresión).
+//        Si S3 NO completó las +2 reps → repetir S3 antes de subir peso.
+// Las sugerencias se muestran en la tarjeta y solo se guardan cuando se edita un
+// campo o se marca el ejercicio como hecho.
+const REP_CAP = 15;
+const MODE_HINT = {
+  maquina: "Anota el número de la placa seleccionada en la columna de pesas.",
+  discos: "Anota la suma de los discos cargados (sin contar el carro de la prensa/hack ni la barra del Smith).",
+  mancuerna_uni: "Anota el peso de la mancuerna. Si es por lado, el peso que usa cada lado.",
+  mancuerna_par: "Anota el peso de UNA mancuerna (el número que trae marcado), no la suma de las dos.",
+  barra: "Anota el total: barra + discos (barra olímpica = 45 lbs / 20 kg; las barras fijas traen el peso marcado).",
+  polea: "Anota el número de la placa seleccionada en la polea.",
+  sin_peso: "Peso corporal: solo se registran repeticiones."
+};
+
+function incrementFor(w, unit, mode) {
+  if (!(w > 0)) return null;
+  const isDb = mode === "mancuerna_uni" || mode === "mancuerna_par";
+  const step = unit === "kg" ? (isDb ? 2 : 2.5) : 5;
+  if (step / w > 0.10) return null;           // el salto mínimo supera el 10 %
+  const min = 0.02 * w;                        // al menos 2 %
+  return Math.max(step, Math.ceil(min / step) * step);
+}
+const r1 = v => Math.round(v * 10) / 10;
+
+// Calcula la sugerencia para un bloque peso/reps (prefijo "" o "2")
+function suggestLoad(w, s1, s3, prev, baseReps, sfx) {
+  const W = "weight" + sfx, R = "reps" + sfx, U = "unit" + sfx, M = "mode" + sfx;
+  const out = {};
+  if (w === 1) {
+    if (!prev || prev[W] == null) return null;
+    out[W] = prev[W]; out[U] = prev[U] || "lbs"; out[M] = prev[M] || null;
+    out[R] = baseReps ?? prev[R] ?? null;
+    return { vals: out, label: `S1: último peso usado (semana ${prev.week})` };
+  }
+  if (!s1 || (s1[R] == null && s1[W] == null)) return null;
+  const unit = s1[U] || "lbs", mode = s1[M] || null;
+  const bw = mode === "sin_peso";
+  const t3 = s1[R] != null ? Math.min(s1[R] + 2, REP_CAP) : null;
+  out[U] = unit; out[M] = mode;
+  if (w === 2) { out[W] = s1[W]; out[R] = s1[R]; return { vals: out, label: "S2: igual que S1" }; }
+  if (w === 3) { out[W] = s1[W]; out[R] = t3; return { vals: out, label: "S3: mismo peso, +2 repeticiones" }; }
+  // w === 4
+  const s3ok = s3 && t3 != null && s3[R] != null && s3[R] >= t3 && (bw || s3[W] == null || s1[W] == null || Number(s3[W]) >= Number(s1[W]));
+  if (bw) { out[W] = null; out[R] = t3; return { vals: out, label: "S4: peso corporal, mantener +2 repeticiones" }; }
+  if (!s3ok) { out[W] = s1[W]; out[R] = t3; return { vals: out, label: hasData(s3) ? "S4: S3 no completó las +2 reps → repetir S3 antes de subir peso" : "S4: sin registro de S3 → repetir S3 antes de subir peso" }; }
+  const inc = incrementFor(Number(s1[W]), unit, mode);
+  if (!inc) { out[W] = s1[W]; out[R] = t3; return { vals: out, label: "S4: el salto mínimo de carga supera el 10 % → mismo peso, reps de S3" }; }
+  out[W] = r1(Number(s1[W]) + inc); out[R] = s1[R];
+  return { vals: out, label: `S4: +${inc} ${unit} (${Math.round(inc / s1[W] * 100)} %) y vuelve a ${s1[R]} reps` };
+}
+function suggestTime(w, s1, prev, sfx) {
+  const S = "seconds" + sfx;
+  if (w === 1) return prev && prev[S] != null ? { vals: { [S]: prev[S] }, label: `S1: último tiempo (semana ${prev.week})` } : null;
+  if (!s1 || s1[S] == null) return null;
+  const add = w === 2 ? 0 : w === 3 ? 5 : 10;
+  return { vals: { [S]: s1[S] + add }, label: w === 2 ? "S2: igual que S1" : `S${w}: +${add} s sobre S1` };
+}
+
+function hasData(l) { return !!l && ["weight", "reps", "seconds", "weight2", "reps2", "seconds2"].some(k => l[k] != null); }
+
+function suggestionFor(re) {
+  const metric = re.exercises.metric_type;
+  if (metric === "cardio") return null;
+  const w = state.week;
+  const cur = (state.logsByWeek[w] || {})[re.id];
+  if (hasData(cur)) return null;
+  const s1 = (state.logsByWeek[1] || {})[re.id];
+  const s3 = (state.logsByWeek[3] || {})[re.id];
+  const prev = (state.prevByEx || {})[re.exercises.id];
+  const parts = [];
+  if (metric === "time") parts.push(suggestTime(w, s1, prev, ""));
+  else {
+    parts.push(suggestLoad(w, s1, s3, prev, re.base_reps, ""));
+    if (metric === "superset_reps_reps") parts.push(suggestLoad(w, s1, s3, prev, re.base_reps, "2"));
+    if (metric === "superset_reps_time") parts.push(suggestTime(w, s1, prev, "2"));
+  }
+  const ok = parts.filter(Boolean);
+  if (!ok.length) return null;
+  const vals = Object.assign({}, ...ok.map(p => p.vals));
+  Object.keys(vals).forEach(k => vals[k] == null && delete vals[k]);
+  return { vals, label: ok[0].label };
+}
+
+// Último registro de cada ejercicio (por exercise_id) ANTES de este mes.
+async function loadPrevByExercise() {
+  const exIds = [...new Set(state.days.flatMap(d => d.routine_exercises.map(re => re.exercises.id)))];
+  state.prevByEx = {};
+  if (!exIds.length) return;
+  const monthStart = (state.month - 1) * 4 + 1;
+  const { data, error } = await sb
+    .from("logs")
+    .select("week, weight, reps, unit, mode, seconds, weight2, reps2, unit2, mode2, seconds2, routine_exercises!inner(exercise_id)")
+    .eq("user_id", state.user)
+    .lt("week", monthStart)
+    .in("routine_exercises.exercise_id", exIds)
+    .order("week", { ascending: false });
+  if (error) { console.error(error); return; }
+  (data || []).forEach(l => {
+    const ex = l.routine_exercises && l.routine_exercises.exercise_id;
+    if (ex && !state.prevByEx[ex] && hasData(l)) state.prevByEx[ex] = l;
+  });
+}
+
+// ── Historial ───────────────────────────────────────────────────
+async function loadHistory() {
+  const reIds = state.days.flatMap(d => d.routine_exercises.map(re => re.id));
+  const w0 = (state.month - 1) * 4 + 1;
+  const byWeek = { 1: {}, 2: {}, 3: {}, 4: {} };
+  if (reIds.length) {
+    const { data, error } = await sb.from("logs").select("*").eq("user_id", state.user)
+      .gte("week", w0).lte("week", w0 + 3).in("routine_exercise_id", reIds);
+    if (error) console.error(error);
+    (data || []).forEach(l => { byWeek[l.week - w0 + 1][l.routine_exercise_id] = l; });
+  }
+  state.hist = { routineId: state.routineId, byWeek, exId: state.hist && state.hist.routineId === state.routineId ? state.hist.exId : null, exLogs: null };
+  if (state.hist.exId) await loadExerciseHistory(state.hist.exId);
+}
+
+async function loadExerciseHistory(exId) {
+  const { data, error } = await sb
+    .from("logs")
+    .select("week, weight, reps, unit, mode, seconds, done, routine_exercises!inner(exercise_id)")
+    .eq("user_id", state.user)
+    .eq("routine_exercises.exercise_id", exId)
+    .order("week", { ascending: true });
+  if (error) console.error(error);
+  state.hist.exId = exId;
+  state.hist.exLogs = (data || []).filter(hasData);
+}
+
+function fmtLog(l, metric) {
+  if (!l) return "";
+  if (metric === "cardio") return l.done ? "✓" : "";
+  const p = [];
+  if (metric === "time" || metric === "superset_reps_time") { if (l.seconds != null) p.push(l.seconds + " s"); }
+  if (metric !== "time") {
+    if (l.weight != null && l.mode !== "sin_peso") p.push(`${fmtN(l.weight)}${l.unit === "kg" ? "kg" : "lb"}`);
+    if (l.reps != null) p.push((l.weight != null && l.mode !== "sin_peso" ? "×" : "") + l.reps);
+  }
+  let t = p.join(l.weight != null && l.reps != null ? "" : " ");
+  if (metric === "superset_reps_reps" && (l.weight2 != null || l.reps2 != null)) t += ` / ${l.weight2 != null ? fmtN(l.weight2) + (l.unit2 === "kg" ? "kg" : "lb") + "×" : ""}${l.reps2 ?? ""}`;
+  if (metric === "superset_reps_time" && l.seconds2 != null) t += ` / ${l.seconds2} s`;
+  return t + (l.done ? " ✓" : "");
+}
+
+function crumbsHtml() {
+  return `
+      <div class="crumbRow">
+        <div class="crumb" onclick="event.stopPropagation(); toggleMenu('year')">
+          ${state.year} <span class="car">▾</span>
+          ${state.openMenu === "year" ? `
+            <div class="menuPop" onclick="event.stopPropagation()">
+              ${yearsAvailable().map(y => `<div class="menuItem ${y === state.year ? "act" : ""}" onclick="selectYear(${y})">${y}</div>`).join("")}
+            </div>` : ""}
+        </div>
+        <div class="crumb" onclick="event.stopPropagation(); toggleMenu('month')">
+          Mes ${state.month} <span class="car">▾</span>
+          ${state.openMenu === "month" ? `
+            <div class="menuPop" onclick="event.stopPropagation()">
+              ${monthsAvailable(state.year).map(m => `<div class="menuItem ${m.month === state.month ? "act" : ""}" onclick="selectMonth(${m.month})">Mes ${m.month}</div>`).join("")}
+            </div>` : ""}
+        </div>
+      </div>`;
+}
+
+function headerHtml(title, greet) {
+  const u = USERS[state.user];
+  return `
+    <div class="header">
+      <div class="avatar" style="background:${u.color}">${initials(u.name)}</div>
+      <div class="who"><div class="greet">${greet || u.name}</div><h1>${title}</h1></div>
+      <button class="switchBtn" onclick="goToLanding()">Cambiar</button>
+    </div>`;
+}
+
+function renderHistory() {
+  document.onclick = () => { if (state.openMenu) { state.openMenu = null; render(); } };
+  if (!state.allRoutines.length) {
+    root.innerHTML = headerHtml("Historial") + tabsHtml() + `<div class="empty">Todavía no hay rutinas.</div>`;
+    return;
+  }
+  if (!state.hist || state.hist.routineId !== state.routineId) {
+    root.innerHTML = headerHtml("Historial") + tabsHtml() + `<div class="loading">Cargando historial...</div>`;
+    loadHistory().then(render);
+    return;
+  }
+  const H = state.hist;
+  const all = state.days.flatMap(d => d.routine_exercises);
+  const pct = w => { const n = all.length; if (!n) return 0; return Math.round(all.filter(re => (H.byWeek[w][re.id] || {}).done).length / n * 100); };
+  const w0 = (state.month - 1) * 4 + 1;
+  const exOptions = [...new Map(all.map(re => [re.exercises.id, re.exercises])).values()].filter(e => e.metric_type !== "cardio");
+  root.innerHTML = `
+    ${headerHtml("Historial", `${USERS[state.user].name} · semanas ${w0}–${w0 + 3}`)}
+    ${tabsHtml()}
+    ${crumbsHtml()}
+    <div class="mCard">
+      <h3>Cumplimiento del mes</h3>
+      <div class="kpis">${[1, 2, 3, 4].map(w => `<div class="kpi"><div class="k">Semana ${w}</div><div class="v">${pct(w)} %</div><div class="s">ejercicios marcados como hechos</div></div>`).join("")}</div>
+    </div>
+    ${state.days.map(d => `
+      <div class="mCard">
+        <h3>D${d.day_order} · ${d.title}</h3>
+        <div class="tblWrap"><table class="mTbl">
+          <thead><tr><th>Ejercicio</th>${[1, 2, 3, 4].map(w => `<th>S${w}</th>`).join("")}</tr></thead>
+          <tbody>${d.routine_exercises.map(re => `<tr><td style="white-space:normal;min-width:150px">${re.exercises.name}<span class="dlt" style="color:#8A93A3;font-weight:500">${re.sets}</span></td>${[1, 2, 3, 4].map(w => `<td>${fmtLog(H.byWeek[w][re.id], re.exercises.metric_type) || "—"}</td>`).join("")}</tr>`).join("")}</tbody>
+        </table></div>
+      </div>`).join("")}
+    <div class="mCard">
+      <h3>Progreso por ejercicio</h3>
+      <select class="modeSelect" style="max-width:100%;width:100%;padding:10px" onchange="pickHistExercise(this.value)">
+        <option value="">Elige un ejercicio…</option>
+        ${exOptions.map(e => `<option value="${e.id}" ${H.exId === e.id ? "selected" : ""}>${e.name}</option>`).join("")}
+      </select>
+      ${H.exId ? exerciseHistoryHtml() : `<div class="note" style="margin-top:8px">Muestra todos los registros de ese ejercicio en todos los meses.</div>`}
+    </div>
+    <div class="mCard"><h3>Formato</h3><div class="note">Peso×repeticiones · lb/kg según lo anotado · ✓ = marcado como hecho. En mancuernas el peso es de una mancuerna.</div></div>
+  `;
+}
+
+function exerciseHistoryHtml() {
+  const L = state.hist.exLogs || [];
+  if (!L.length) return `<div class="note" style="margin-top:8px">Sin registros de este ejercicio.</div>`;
+  const withW = L.filter(l => l.weight != null && l.mode !== "sin_peso");
+  let chart = "";
+  if (withW.length >= 2) {
+    const narrow = window.innerWidth < 600;
+    const W = narrow ? 360 : 640, Hh = 170, Lp = 34, R = 10, T = 12, B = 24;
+    // Para comparar entre registros en lb y kg se convierte todo a la unidad más usada.
+    const kgCount = withW.filter(l => l.unit === "kg").length;
+    const unit = kgCount > withW.length / 2 ? "kg" : "lb";
+    const conv = l => unit === "kg" ? (l.unit === "kg" ? +l.weight : l.weight * 0.4536) : (l.unit === "kg" ? l.weight * 2.2046 : +l.weight);
+    const vs = withW.map(conv);
+    const minV = Math.floor(Math.min(...vs)), maxV = Math.ceil(Math.max(...vs)) + (Math.min(...vs) === Math.max(...vs) ? 1 : 0);
+    const wk0 = withW[0].week, wk1 = withW[withW.length - 1].week;
+    const x = wk => Lp + (W - Lp - R) * ((wk - wk0) / Math.max(1, wk1 - wk0));
+    const y = v => T + (Hh - T - B) * (1 - (v - minV) / Math.max(1, maxV - minV));
+    chart = `<div class="chartBox" style="margin-top:10px"><svg viewBox="0 0 ${W} ${Hh}">
+      ${[minV, maxV].map(v => `<text x="${Lp - 5}" y="${y(v) + 3}" fill="#8A93A3" font-size="10" text-anchor="end">${Math.round(v)}</text><line x1="${Lp}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="rgba(255,255,255,.06)"/>`).join("")}
+      <path d="${withW.map((l, i) => `${i ? "L" : "M"}${x(l.week).toFixed(1)},${y(conv(l)).toFixed(1)}`).join(" ")}" fill="none" stroke="#5C93AE" stroke-width="2.5"/>
+      ${withW.map(l => `<circle cx="${x(l.week)}" cy="${y(conv(l))}" r="4" fill="#5C93AE"><title>Semana ${l.week}: ${fmtN(l.weight)} ${l.unit || "lbs"} × ${l.reps ?? "—"}</title></circle>`).join("")}
+      ${[...new Set(withW.map(l => Math.ceil(l.week / 4)))].map(m => `<text x="${x(Math.max(wk0, (m - 1) * 4 + 1))}" y="${Hh - 6}" fill="#8A93A3" font-size="10" text-anchor="middle">M${m}</text>`).join("")}
+    </svg><div class="legend"><span>Peso en ${unit} por semana</span></div></div>`;
+  }
+  return chart + `
+    <div class="tblWrap" style="margin-top:8px"><table class="mTbl">
+      <thead><tr><th>Semana</th><th>Mes</th><th>Registro</th></tr></thead>
+      <tbody>${L.slice().reverse().map(l => `<tr><td>${l.week}</td><td>${Math.ceil(l.week / 4)} · S${(l.week - 1) % 4 + 1}</td><td>${fmtLog(l, l.seconds != null && l.weight == null && l.reps == null ? "time" : "reps")}</td></tr>`).join("")}</tbody>
+    </table></div>`;
+}
+async function pickHistExercise(exId) {
+  if (!exId) { state.hist.exId = null; render(); return; }
+  await loadExerciseHistory(exId);
+  render();
+}
+
+// ── Perfil ──────────────────────────────────────────────────────
+async function renderProfile() {
+  document.onclick = null;
+  if (!state.mdata) { root.innerHTML = headerHtml("Perfil") + tabsHtml() + `<div class="loading">Cargando perfil...</div>`; await loadMeasures(); }
+  const p = state.mdata.profile || {};
+  const age = ageFrom(p.birth_date);
+  root.innerHTML = `
+    ${headerHtml("Perfil", `${USERS[state.user].name}${age != null ? " · " + age + " años" : ""}`)}
+    ${tabsHtml()}
+    <div class="mCard">
+      <h3>Datos y metas</h3>
+      <form id="pForm" class="formGrid">
+        ${inp("height_cm", "Altura (cm)", p.height_cm, `type="number" step="0.1" min="0"`)}
+        <label>Sexo<select name="sex" class="modeSelect" style="max-width:none;padding:9px 10px;font-size:14px"><option value="">—</option><option value="F" ${p.sex === "F" ? "selected" : ""}>Femenino</option><option value="M" ${p.sex === "M" ? "selected" : ""}>Masculino</option></select></label>
+        ${inp("birth_date", "Fecha de nacimiento", p.birth_date ? String(p.birth_date).slice(0, 10) : "", `type="date"`)}
+        ${inp("sessions_per_week", "Entrenamientos por semana", p.sessions_per_week, `type="number" step="1" min="1" max="7"`)}
+        ${inp("goal_weight", "Meta de peso (kg)", p.goal_weight, `type="number" step="0.1" min="0"`)}
+        ${inp("goal_date", "Fecha meta", p.goal_date ? String(p.goal_date).slice(0, 10) : "", `type="date"`)}
+        ${inp("long_term_goal_weight", "Meta largo plazo (kg)", p.long_term_goal_weight, `type="number" step="0.1" min="0"`)}
+        <div></div>
+        <label class="full">Prioridad<input name="goal_priority" value="${(p.goal_priority || "").replace(/"/g, "&quot;")}" maxlength="200"></label>
+        <div class="full"><button type="submit" class="mBtn" style="width:100%;padding:12px">Guardar perfil</button></div>
+      </form>
+    </div>
+    <div class="mCard">
+      <h3>¿Qué peso anoto?</h3>
+      <div class="note">
+        Elige el tipo de carga en cada ejercicio; la tarjeta te recuerda qué anotar. Lo importante es anotar <b>siempre igual</b> el mismo ejercicio para que las semanas se puedan comparar.
+        <ul style="padding-left:18px;margin:8px 0 0">
+          <li><b>2 mancuernas:</b> el peso de UNA mancuerna (el número marcado).</li>
+          <li><b>1 mancuerna:</b> el peso de esa mancuerna; en ejercicios por lado, el de cada lado.</li>
+          <li><b>Barra libre:</b> el total, barra incluida (barra olímpica 45 lbs / 20 kg).</li>
+          <li><b>Discos (prensa, hack, Smith):</b> la suma de los discos cargados, sin el carro ni la barra del Smith (su peso varía entre máquinas).</li>
+          <li><b>Máquina de placas y polea:</b> el número de la placa seleccionada.</li>
+          <li><b>Peso corporal:</b> solo repeticiones.</li>
+          <li><b>Repeticiones:</b> las que lograste en todas las series. Si una serie quedó corta, anota la menor.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="mCard">
+      <h3>Cómo progresa el mes</h3>
+      <div class="note">
+        <ul style="padding-left:18px;margin:0">
+          <li><b>S1:</b> la app sugiere el último peso que usaste en ese ejercicio con las repeticiones base de la rutina. Ajusta para quedar con 2–3 repeticiones en reserva.</li>
+          <li><b>S2:</b> repite S1.</li>
+          <li><b>S3:</b> mismo peso, +2 repeticiones (máximo 15).</li>
+          <li><b>S4:</b> si en S3 lograste las +2 repeticiones, sube la carga entre 2 y 10 % (ACSM, 2009) y vuelve a las repeticiones de S1. Si no las lograste, repite S3. Si el salto mínimo disponible es mayor al 10 % (por ejemplo, de 8 a 13 lbs), mantén el peso y las repeticiones de S3.</li>
+          <li><b>Tiempo (planchas):</b> S3 +5 s y S4 +10 s sobre S1.</li>
+        </ul>
+        Las sugerencias aparecen en la tarjeta del ejercicio y solo se guardan al editar un campo o marcar el ejercicio como hecho.
+      </div>
+    </div>`;
+  document.getElementById("pForm").onsubmit = async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const row = {
+      height_cm: numOrNull(fd.get("height_cm")), sex: fd.get("sex") || null, birth_date: fd.get("birth_date") || null,
+      sessions_per_week: intOrNull(fd.get("sessions_per_week")), goal_weight: numOrNull(fd.get("goal_weight")),
+      goal_date: fd.get("goal_date") || null, long_term_goal_weight: numOrNull(fd.get("long_term_goal_weight")),
+      goal_priority: (fd.get("goal_priority") || "").trim() || null
+    };
+    const { error } = await sb.from("profiles").update(row).eq("id", state.user);
+    if (error) { flash("Error al guardar: " + error.message); return; }
+    flash("Perfil guardado ✓");
+    await loadMeasures(); render();
+  };
 }
 
 // ── Init ────────────────────────────────────────────────────────
